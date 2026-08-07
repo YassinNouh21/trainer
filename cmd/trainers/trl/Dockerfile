@@ -12,13 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-  - deepspeed_distributed.yaml
-  - mlx_distributed.yaml
-  - torch_distributed.yaml
-  - jax_distributed.yaml
-  - xgboost_distributed.yaml
-  - torchtune
-  - trl
+# Same base as cmd/trainers/torchtune so the two runtimes are comparable.
+FROM pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
+
+WORKDIR /workspace
+
+RUN apt update && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY cmd/trainers/trl/requirements.txt .
+
+RUN pip install -r requirements.txt
+
+COPY cmd/trainers/trl/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

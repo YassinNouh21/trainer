@@ -1,0 +1,106 @@
+# Copyright The Kubeflow Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Mirrors manifests/base/runtimes/torchtune/qwen2_5/qwen2_5_1.5B.yaml so TRL is
+# the only variable when the two are compared. One runtime per base model.
+
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: ClusterTrainingRuntime
+metadata:
+  name: trl-qwen2.5-1.5b
+  labels:
+    trainer.kubeflow.org/framework: trl
+spec:
+  mlPolicy:
+    numNodes: 1
+    # Engages the Torch plugin. The command is not ["tune","run"], so the
+    # plugin injects PET_* and port 29500 without rewriting it.
+    torch: {}
+  template:
+    spec:
+      volumeClaimPolicies:
+        - templates:
+            - metadata:
+                name: initializer
+              spec:
+                accessModes: ["ReadWriteOnce"]
+                resources:
+                  requests:
+                    storage: 20Gi
+      replicatedJobs:
+        - name: dataset-initializer
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: dataset-initializer
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: dataset-initializer
+                      image: ghcr.io/kubeflow/trainer/dataset-initializer
+                      env:
+                        - name: STORAGE_URI
+                          value: hf://tatsu-lab/alpaca
+                      volumeMounts:
+                        - mountPath: /workspace
+                          name: initializer
+        - name: model-initializer
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: model-initializer
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: model-initializer
+                      image: ghcr.io/kubeflow/trainer/model-initializer
+                      env:
+                        - name: STORAGE_URI
+                          value: hf://Qwen/Qwen2.5-1.5B-Instruct
+                      volumeMounts:
+                        - name: initializer
+                          mountPath: /workspace
+        - name: node
+          dependsOn:
+            - name: dataset-initializer
+              status: Complete
+            - name: model-initializer
+              status: Complete
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: trainer
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: node
+                      image: ghcr.io/kubeflow/trainer/trl-trainer
+                      env:
+                        - name: TRL_METHOD
+                          value: sft
+                      command:
+                        - /usr/local/bin/entrypoint.sh
+                      args:
+                        - --model_name_or_path=/workspace/model
+                        - --dataset_name=/workspace/dataset
+                        - --output_dir=/workspace/output
+                      resources:
+                        limits:
+                          nvidia.com/gpu: 1
+                      volumeMounts:
+                        - mountPath: /workspace
+                          name: initializer
