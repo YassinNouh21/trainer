@@ -24,7 +24,10 @@ COPY cmd/trainers/trl/requirements.txt .
 
 RUN pip install -r requirements.txt
 
-COPY cmd/trainers/trl/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+# Installed on PATH, not referenced by absolute path, so a runtime's command is
+# ["trl-launch"] — a name the torch plugin can match on, exactly as it matches
+# ["tune", "run"] for torchtune.
+COPY cmd/trainers/trl/trl-launch /usr/local/bin/trl-launch
+RUN chmod +x /usr/local/bin/trl-launch
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["trl-launch"]

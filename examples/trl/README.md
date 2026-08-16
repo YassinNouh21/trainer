@@ -2,7 +2,10 @@
 
 Answers the action item *"check that the TRL CLI is going to work with the torch
 plugin"*, scoped on the community call as a PoC with no SDK changes. There is no
-Go in this branch — only a Dockerfile, an entrypoint, and a runtime manifest.
+Go in this branch — only a Dockerfile, an adapter, and a runtime manifest.
+
+**Short answer:** yes, but only with an adapter, and a naive adapter fails
+*silently*. The plugin itself needs no changes.
 
 ## The question
 
@@ -34,40 +37,66 @@ wrong**: every pod trains independently, with no error and no hang.
 
 ## What makes it work
 
-`entrypoint.sh` translates the plugin's environment into
+`trl-launch` translates the plugin's environment into
 `--num_processes/--num_machines/--machine_rank/--main_process_ip/--main_process_port`
 and execs the TRL CLI. TRL forwards flags its own parser does not recognise
 through to accelerate, which is what lets this work without any control-plane
-change. Two details it has to get right:
+change. Details it has to get right:
 
 - `--num_processes` is the **total across all machines**, while
   `PET_NPROC_PER_NODE` is per-node — so it multiplies by `PET_NNODES`.
 - the plugin leaves `numProcPerNode` as the literal `"auto"` when GPUs are
   requested (`torch.go:121,133`). `torchrun` accepts that; accelerate does not.
+- **`--multi_gpu` must be passed explicitly.** Accelerate auto-enables the
+  multi-GPU path only when the *local* process sees `torch.cuda.device_count() > 1`.
+  At one GPU per pod it never infers it, so without the flag every pod runs at
+  world size 1 — and exits 0.
+- **CPU multi-node is impossible through accelerate.** Every distributed branch
+  in `launch_command` is guarded `and not args.cpu`, so `--use_cpu` falls
+  through to `simple_launcher`, which never sets `RANK`/`WORLD_SIZE`. The
+  adapter refuses the combination rather than producing N isolated trainings.
 
 ## Verified on a cluster
 
-Against Kubeflow Trainer v2.2.0, the rendered JobSet showed the plugin injecting
-all five `PET_*` variables and port 29500, leaving `command` untouched, and the
-entrypoint producing:
+The rendered JobSet showed the plugin injecting all five `PET_*` variables and
+port 29500, leaving `command` untouched, and the adapter producing:
 
 ```
-[entrypoint] trl sft --num_processes 2 --num_machines 2 --machine_rank 0 \
+[trl-launch] trl sft --multi_gpu --num_processes 2 --num_machines 2 --machine_rank 0 \
   --main_process_ip <job>-node-0-0.<job> --main_process_port 29500 ...
 ```
 
 Both branches of the `numProcPerNode` logic were exercised: `"auto"` with GPUs
 requested, and a plain integer derived from the CPU request without them.
 
-**Not yet verified:** two ranks completing a rendezvous. Rank 1 never scheduled
-(no free GPU, then no free pod slots), so everything upstream of the handshake
-is confirmed and the handshake itself is not.
+### The rendezvous, and the silent failure
+
+Two jobs were run on two CPU nodes, differing only in what consumed `PET_*`:
+
+| Job | Consumer | Result |
+|---|---|---|
+| `trl-demo` | `trl sft` → accelerate, first version of the adapter | Flags translated **correctly** — `machine_rank` 0 and 1, matching `main_process_ip` — yet `epoch` advanced `1/52002` per step instead of `2/52002`. **World size 1.** Both pods `Succeeded`, TrainJob `Complete`. |
+| `probe-rendezvous` | bare `torchrun` reading `PET_*` | `[Gloo] Rank 1 is connected to 1 peer ranks`, `rank=1 world_size=2 allreduce=2.0`. **Real rendezvous.** |
+
+The probe is a bare `torchrun` over a script that joins a Gloo process group and
+all-reduces, each rank contributing `1.0`. A sum of `2.0` can only come from two
+processes that actually exchanged data, so it cannot be faked.
+
+That pair is the whole finding. The plugin's `PET_*` is correct and sufficient —
+torchrun proves it on the same configuration. What fails is accelerate, which
+does not read `PET_*` at all, and it fails **without an error**. The first
+version of this adapter translated the flags perfectly and still produced two
+isolated trainings reported as one distributed job. The three guards in
+`trl-launch` exist because of that run.
+
+Design write-up and the equivalent analysis for Axolotl, LlamaFactory, and
+Unsloth: [`proposals/2839-dynamic-llm-trainer/README.md`](../../proposals/2839-dynamic-llm-trainer/README.md), Part I.
 
 ## Layout
 
 ```
 cmd/trainers/trl/Dockerfile          # trl + accelerate + peft on the torchtune base
-cmd/trainers/trl/entrypoint.sh       # env -> accelerate flags; no training logic
+cmd/trainers/trl/trl-launch          # PET_* -> accelerate flags; no training logic
 manifests/base/runtimes/trl/         # ClusterTrainingRuntime, framework: trl
 examples/trl/trl-trainjob.yaml       # plain TrainJob
 ```

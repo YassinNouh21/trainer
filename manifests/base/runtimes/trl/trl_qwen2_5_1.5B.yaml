@@ -92,8 +92,11 @@ spec:
                       env:
                         - name: TRL_METHOD
                           value: sft
+                      # constants.TRLEntrypoint. Not ["tune","run"], so the torch
+                      # plugin takes its default path: inject all five PET_* and
+                      # leave the command alone.
                       command:
-                        - /usr/local/bin/entrypoint.sh
+                        - trl-launch
                       args:
                         - --model_name_or_path=/workspace/model
                         - --dataset_name=/workspace/dataset
