@@ -3,7 +3,8 @@
 # spec.trainer.args replaces the runtime's container args rather than appending
 # to them, so the runtime's paths have to be repeated here.
 #
-# Set TRL_SKIP_ACCELERATE_ARGS=1 on the trainer container for the control run.
+# The runtime launches torchrun -m trl.scripts.sft; torchrun consumes the
+# plugin's PET_* natively, so there are no launcher knobs to set here.
 
 apiVersion: trainer.kubeflow.org/v1alpha1
 kind: TrainJob

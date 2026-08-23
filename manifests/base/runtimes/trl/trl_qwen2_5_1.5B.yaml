@@ -89,14 +89,16 @@ spec:
                   containers:
                     - name: node
                       image: ghcr.io/kubeflow/trainer/trl-trainer
-                      env:
-                        - name: TRL_METHOD
-                          value: sft
-                      # constants.TRLEntrypoint. Not ["tune","run"], so the torch
-                      # plugin takes its default path: inject all five PET_* and
-                      # leave the command alone.
+                      # torchrun reads the plugin's PET_* natively and execs
+                      # TRL's plain training script as a module -- the `trl` CLI
+                      # and `accelerate launch` are never invoked. The command is
+                      # not ["tune","run"], so the torch plugin takes its default
+                      # path: inject all five PET_* and leave the command alone.
+                      # Other methods swap the module: trl.scripts.dpo, ...
                       command:
-                        - trl-launch
+                        - torchrun
+                        - -m
+                        - trl.scripts.sft
                       args:
                         - --model_name_or_path=/workspace/model
                         - --dataset_name=/workspace/dataset

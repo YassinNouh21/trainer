@@ -4,9 +4,10 @@
 # `trl` CLI, no `accelerate launch`, no adapter, no plugin change.
 #
 # This is the torchrun-first direction agreed on the SDK call: bypass the TRL
-# CLI (which is hardwired to accelerate's launcher) and launch trl/scripts/sft.py
-# with torchrun, which reads PET_* natively and exports RANK/WORLD_SIZE to the
-# script, where in-process accelerate picks them up (PartialState env detection).
+# CLI (which is hardwired to accelerate's launcher) and launch it as `torchrun -m
+# trl.scripts.sft` — the runtime manifest's exact command. torchrun reads PET_*
+# natively and exports RANK/WORLD_SIZE to the script, where in-process
+# accelerate picks them up (PartialState env detection).
 #
 # Runs in a Linux container (the pods' environment; macOS breaks on an MPS
 # quirk unrelated to any of this). Simulates two Kubeflow pods as two torchrun
@@ -33,7 +34,6 @@ cd /w
 export PIP_CACHE_DIR=/w/.pipcache HF_HOME=/w/.hf
 pip install -q trl peft 2>&1 | tail -1 || true
 python -c "import trl, torch; print('versions: trl', trl.__version__, '| torch', torch.__version__)"
-SFT_SCRIPT=$(python -c 'import trl.scripts.sft as m; print(m.__file__)')
 mkdir -p logs
 
 # Tiny random model + tiny dataset from TRL's own test fixtures: a few MB,
@@ -53,7 +53,7 @@ run_node() {  # $1=nnodes $2=node_rank $3=log $4=outdir
     PET_NPROC_PER_NODE=1 \
     PET_MASTER_ADDR=127.0.0.1 \
     PET_MASTER_PORT=29500 \
-    torchrun "$SFT_SCRIPT" $TRAIN_ARGS --output_dir "logs/$4" >"logs/$3" 2>&1
+    torchrun -m trl.scripts.sft $TRAIN_ARGS --output_dir "logs/$4" >"logs/$3" 2>&1
 }
 
 echo "=== control: single node (PET_NNODES=1) ==="

@@ -24,10 +24,9 @@ COPY cmd/trainers/trl/requirements.txt .
 
 RUN pip install -r requirements.txt
 
-# Installed on PATH, not referenced by absolute path, so a runtime's command is
-# ["trl-launch"] — a name the torch plugin can match on, exactly as it matches
-# ["tune", "run"] for torchtune.
-COPY cmd/trainers/trl/trl-launch /usr/local/bin/trl-launch
-RUN chmod +x /usr/local/bin/trl-launch
-
-ENTRYPOINT ["trl-launch"]
+# The runtime command is torchrun invoking TRL's training script as a module
+# (trl/scripts/sft.py is a plain script: TrlParser + SFTTrainer, no launcher).
+# torchrun reads the PET_* env the torch plugin injects natively, so there is
+# no adapter and no `accelerate launch` anywhere in the path. Other methods are
+# their module name: trl.scripts.dpo, trl.scripts.grpo, ...
+ENTRYPOINT ["torchrun", "-m", "trl.scripts.sft"]

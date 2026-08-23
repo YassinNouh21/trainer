@@ -1,5 +1,7 @@
-# trl 1.9.2 forwards unrecognised flags to `accelerate launch`; older releases
-# split arguments differently, so re-check before bumping.
+# The runtime launches trl/scripts/sft.py with torchrun directly; the `trl` CLI
+# (which is hardwired to `accelerate launch`) is never invoked. accelerate stays
+# here only as the in-process library transformers depends on -- its
+# PartialState reads the RANK/WORLD_SIZE/LOCAL_RANK env that torchrun exports.
 trl==1.9.2
 transformers>=4.57.0
 accelerate>=1.10.0
